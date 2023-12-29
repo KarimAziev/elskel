@@ -30,8 +30,6 @@
 
 ;;; Code:
 
-(require 'fp)
-
 (defvar manual-program)
 
 (declare-function info--manual-names "info")
@@ -40,43 +38,6 @@
 (declare-function Man-parse-man-k "man")
 (declare-function Man-default-directory "man")
 
-(defvar elskel--use-package--keywords-completions
-  `((":disabled" . (t nil))
-    (":load-path")
-    (":straight" . (lambda ()
-                     (let* ((choices '("git" "built-in" "nil"))
-                            (result (completing-read ":type\s" choices)))
-                      (pcase result
-                       ("built-in" (prin1-to-string '(:type built-in)))
-                       ("git"
-                        (require 'gh-repo)
-                        (require 'git-util)
-                        (let ((user (git-util-config "user.email")))
-                         (prin1-to-string
-                          (if
-                              (and user
-                               (yes-or-no-p (format
-                                             "Repo of %s?" user)))
-                              `(:repo
-                                ,(substring-no-properties
-                                  (gh-repo-read-user-repo "Repo:" 'identity))
-                                :type git
-                                :flavor nil
-                                :host github)
-                            (let* ((url
-                                    (completing-read
-                                     "Repo: "
-                                     (git-util-url-get-candidates)))
-                                   (pl (or (git-util-url-to-recipe url)
-                                        `(:repo ,(read-string "Repo:"
-                                                  url)
-                                          :type git
-                                          :host github))))
-                             pl)))))
-                       (_ result)))))
-    (":init" . elskel--snippet-insert)
-    (":config" . elskel--snippet-insert))
-  "Completions for `use-package' keywords.")
 
 (defvar elskel--snippets '(("lambda" . "")
                            ("defun" . "")
@@ -94,6 +55,51 @@
 
 (defvar elskel--use-package-keywords-completions nil
   "List of completion candidates for `use-package' keywords.")
+
+(defvar elskel--use-package--keywords-completions
+  `((":disabled" . (t nil))
+    (":load-path")
+    (":straight" . (lambda ()
+                     (let* ((choices '("git" "built-in" "nil"))
+                            (result (completing-read ":type\s" choices)))
+                      (pcase result
+                       ("built-in" (prin1-to-string '(:type built-in)))
+                       ("git"
+                        (require 'gh-repo nil t)
+                        (require 'git-util nil t)
+                        (let ((user (git-util-config "user.email")))
+                         (prin1-to-string
+                          (if
+                              (and user
+                               (yes-or-no-p (format
+                                             "Repo of %s?" user)))
+                              `(:repo
+                                ,(substring-no-properties
+                                  (if (fboundp 'gh-repo-read-user-repo)
+                                      (gh-repo-read-user-repo "Repo:" 'identity)
+                                    (read-string "Repo: ")))
+                                :type git
+                                :flavor nil
+                                :host github)
+                            (let* ((url
+                                    (if (fboundp 'git-util-url-get-candidates)
+                                        (completing-read
+                                         "Repo: "
+                                         (git-util-url-get-candidates))
+                                      (read-string "Repo: ")))
+                                   (pl (or (and
+                                            (fboundp 'git-util-url-to-recipe)
+                                            (git-util-url-to-recipe url))
+                                        `(:repo ,(read-string "Repo:"
+                                                  url)
+                                          :type git
+                                          :flavor nil
+                                          :host github))))
+                             pl)))))
+                       (_ result)))))
+    (":init" . elskel--snippet-insert)
+    (":config" . elskel--snippet-insert))
+  "Completions for `use-package' keywords.")
 
 (defun elskel--manpage-cands ()
   "Generate candidates for man page completion."
@@ -493,16 +499,14 @@ Remaining arguments ARGS are additional arguments passed to `completing-read'."
           (setq current (apply #'completing-read prompt alist args))
           (push current result)
           (setq alist (or (cdr-safe (assoc current alist))
-                          (cdr (seq-find (fp-compose
-                                          (fp-cond
-                                            [symbolp
-                                             (fp-compose
-                                              (fp-partial
-                                               string=
-                                               current)
-                                              symbol-name)])
-                                          car-safe)
-                                         alist))))
+                          (cdr (seq-find
+                                (lambda (it) (when-let ((val (car-safe it)))
+                                               (pcase val
+                                                 ((pred symbolp)
+                                                  (string=
+                                                   current
+                                                   (symbol-name val))))))
+                                alist))))
           (when (functionp alist)
             (let ((value (funcall alist)))
               (if (and (listp value)
@@ -703,10 +707,14 @@ defaulting to 1."
   (seq-uniq
    (append
     elskel--use-package--keywords-completions
-    (mapcar (fp-compose list symbol-name)
-            (when (boundp 'use-package-keywords)
-              use-package-keywords)))
-   (fp-use-with string= [car car])))
+    (mapcar
+     (lambda (it)
+       (list (symbol-name it)))
+     (when (boundp 'use-package-keywords)
+       use-package-keywords)))
+   (lambda (a b)
+     (string= (car a)
+              (car b)))))
 
 (define-skeleton elskel-defcustom-skeleton
   "Generate a `defcustom' skeleton with group and type placeholders."
@@ -908,10 +916,8 @@ Argument ITEM is a string that will be inserted into the buffer."
                             (flatten-list
                              (elskel--complete-alist
                               prefix
-                              (seq-filter (fp-compose
-                                           (apply-partially
-                                            #'string-prefix-p prefix)
-                                           'car)
+                              (seq-filter (pcase-lambda (`(,k . ,_v))
+                                            (string-prefix-p prefix k))
                                           elskel--use-package-keywords-completions)))
                             "\s")))
           ((setq prefix (save-excursion
