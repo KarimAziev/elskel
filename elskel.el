@@ -409,32 +409,42 @@ inherits the current input method."
                        require-match initial-input hist
                        def inherit-input-method))))
 
-(defun elskel--completing-read-with-preview (prompt alist &rest args)
+(defun elskel--completing-read-with-preview (prompt alist &optional
+                                                    display-to-real &rest args)
   "Preview completion candidates while prompting for input.
 
 Argument PROMPT is a string to display as the prompt in the minibuffer.
 
-Argument ALIST is an association list where each element is a cons cell (key .
-value) used for completion.
+Argument ALIST is a list or array of strings, or an alist where keys are
+strings, or a function that generates such a list.
+
+Optional argument DISPLAY-TO-REAL is a function that takes a single string
+argument and returns the real value associated with the display value.
 
 Remaining arguments ARGS are additional arguments passed to the internal
 function `elskel--completing-read-with-preview-action'."
   (let ((pos (point))
+        (buff (current-buffer))
+        (display-to-real-fn (if (functionp display-to-real)
+                                display-to-real
+                              #'elskel--get-completion-prefix))
         (ov))
     (unwind-protect
         (apply #'elskel--completing-read-with-preview-action
                prompt
                alist
                (lambda (it)
-                 (when ov
+                 (when (overlayp ov)
                    (delete-overlay ov))
-                 (setq ov (elskel--make-overlay pos
-                                                pos nil nil nil 'after-string
-                                                (or
-                                                 (elskel--get-completion-prefix it)
-                                                 it))))
+                 (when (buffer-live-p buff)
+                   (setq ov (elskel--make-overlay pos
+                                                  pos nil nil nil 'after-string
+                                                  (or (funcall display-to-real-fn
+                                                               it)
+                                                      it)))))
                args)
-      (when ov (delete-overlay ov)))))
+      (when (overlayp ov)
+        (delete-overlay ov)))))
 
 (defun elskel--make-overlay (start end &optional buffer front-advance
                                    rear-advance &rest props)
@@ -719,25 +729,26 @@ defaulting to 1."
 (define-skeleton elskel-defcustom-skeleton
   "Generate a `defcustom' skeleton with group and type placeholders."
   "Defcustom:"
-  "(defcustom "  (setq v1 (file-name-base (buffer-name))) "-"
+  "(defcustom "
+  (read-string "Name" (concat (file-name-base (buffer-name)) "-"))
   " nil" \n >
-  (prin1-to-string (concat (capitalize v1) "."))
+  (prin1-to-string (concat (capitalize (file-name-base (buffer-name))) "."))
   \n >
-  ":group '" v1
+  ":group '" (file-name-base (buffer-name))
   \n >
   ":type " _
   ")")
 
 (define-skeleton elskel-defvar-local-skeleton
   "Create a `defvar-local' skeleton with buffer-based variable name."
-  "Defcustom:"
+  "defvar-local"
   "(defvar-local "  (setq v1 (concat (file-name-base (buffer-name)) "-"))
   _
   " nil" ")")
 
 (define-skeleton elskel-defvar-skeleton
   "Create a `defvar' skeleton with a variable name prefix."
-  "Defcustom:"
+  "defvar"
   "(defvar "  (setq v1 (concat (file-name-base (buffer-name)) "-"))
   _
   " nil" ")")
@@ -1062,27 +1073,48 @@ defaults to 1."
                                   (string-join (split-string
                                                 (prin1-to-string ctype) nil t)
                                                " "))
-                          (concat (or prefix "")
-                                  (pp-to-string ctype)))
+                          ctype)
                          vals)))))
             vals))
-         (pos (point))
-         (ov))
-    (unwind-protect
-        (insert
-         (cdr (assoc-string
-               (elskel--completing-read-with-preview
-                "Keymap: "
-                alist
-                (lambda (it)
-                  (when-let ((val (cdr (assoc-string it alist))))
-                    (when ov
-                      (delete-overlay ov))
-                    (setq ov (elskel--make-overlay pos
-                                                   pos nil nil nil 'after-string
-                                                   val)))))
-               alist)))
-      (when ov (delete-overlay ov)))))
+         (col (current-column))
+         (margin (make-string col ?\s))
+         (choice (cdr (assoc-string
+                       (elskel--completing-read-with-preview
+                        "Keymap: "
+                        alist
+                        (lambda (it)
+                          (let* ((parts (split-string
+                                         (with-temp-buffer
+                                           (let ((emacs-lisp-mode-hook nil)
+                                                 (indent-tabs-mode nil))
+                                             (emacs-lisp-mode)
+                                             (save-excursion
+                                               (insert
+                                                (concat (or prefix "")
+                                                        (pp-to-string
+                                                         (cdr
+                                                          (assoc-string it
+                                                                        alist))))))
+                                             (font-lock-ensure))
+                                           (buffer-string))
+                                         "[\n]" t))
+                                 (first-line (pop parts))
+                                 (str
+                                  (if parts
+                                      (concat first-line "\n"
+                                              (mapconcat (lambda (l)
+                                                           (concat margin l))
+                                                         parts "\n"))
+                                    first-line)))
+                            str)))
+                       alist))))
+    (when choice
+      (setq choice (pp-to-string choice))
+      (save-excursion
+        (insert (if prefix
+                    (concat prefix choice)
+                  choice)))
+      (indent-sexp))))
 
 (defun elskel--inside-defcustom-type-p ()
   "Check if point is inside `defcustom' type specification."
