@@ -1122,16 +1122,27 @@ defaults to 1."
          (depth (car ppss)))
     (cond ((= depth 1)
            (condition-case nil
-               (progn (backward-sexp 1)
-                      (and (eq (symbol-at-point) :type)
-                           (progn
-                             (backward-up-list 1)
-                             (pcase (sexp-at-point)
-                               (`(defcustom ,(pred (symbolp))
-                                   ,_val
-                                   ,(pred (stringp))
-                                   . ,_body)
-                                t)))))
+               (let ((quoted (char-before)))
+                 (progn (backward-sexp 1)
+                        (and (eq (symbol-at-point) :type)
+                             (progn
+                               (backward-up-list 1)
+                               (let ((sexp (or (sexp-at-point))))
+                                 (pcase sexp
+                                   (`(defcustom ,(pred (symbolp))
+                                       ,_val
+                                       ,(pred (stringp))
+                                       . ,_body)
+                                    t)
+                                   ((pred not)
+                                    (progn (down-list 1)
+                                           (forward-sexp)
+                                           (when (and
+                                                  (eq 'defcustom
+                                                      (symbol-at-point)))
+                                             (forward-sexp 1)
+                                             (and (symbol-at-point)
+                                                  (memq quoted '(?\`?\'))))))))))))
              (error nil)))
           ((> depth 1)
            (when-let ((start (cadr (nth 9 ppss))))
