@@ -38,69 +38,202 @@
 (declare-function Man-parse-man-k "man")
 (declare-function Man-default-directory "man")
 
-(defvar elskel--snippets '(("lambda" . "")
-                           ("defun" . "")
-                           ("defmacro" . "")
-                           ("cl-defun" . "")
-                           ("defvar" . "")
-                           ("defvar-local" . "")
-                           ("defcustom" . "")
-                           ("use-package" . "")
-                           ("transient-define-argument" . "")
-                           ("transient-define-suffix" . "")
-                           ("transient-define-prefix" . "")
-                           ("advice-add" . ""))
-  "Alist of snippet templates for common Lisp expressions.")
+(require 'elskel-skeletons)
 
 (defvar elskel--use-package-keywords-completions nil
   "List of completion candidates for `use-package' keywords.")
 
-(defvar elskel--use-package--keywords-completions
-  `((":disabled" . (t nil))
-    (":load-path")
-    (":straight" . (lambda ()
-                     (let* ((choices '("git" "built-in" "nil"))
-                            (result (completing-read ":type\s" choices)))
-                      (pcase result
-                       ("built-in" (prin1-to-string '(:type built-in)))
-                       ("git"
-                        (require 'gh-repo nil t)
-                        (require 'git-util nil t)
-                        (let ((user (git-util-config "user.email")))
-                         (prin1-to-string
-                          (if
-                              (and user
-                               (yes-or-no-p (format
-                                             "Repo of %s?" user)))
-                              `(:repo
-                                ,(substring-no-properties
-                                  (if (fboundp 'gh-repo-read-user-repo)
-                                      (gh-repo-read-user-repo "Repo:" 'identity)
-                                    (read-string "Repo: ")))
-                                :type git
-                                :flavor nil
-                                :host github)
-                            (let* ((url
-                                    (if (fboundp 'git-util-url-get-candidates)
-                                        (completing-read
-                                         "Repo: "
-                                         (git-util-url-get-candidates))
-                                      (read-string "Repo: ")))
-                                   (pl (or (and
-                                            (fboundp 'git-util-url-to-recipe)
-                                            (git-util-url-to-recipe url))
-                                        `(:repo ,(read-string "Repo:"
-                                                  url)
-                                          :type git
-                                          :flavor nil
-                                          :host github))))
-                             pl)))))
-                       (_ result)))))
-    (":init" . elskel--snippet-insert)
-    (":config" . elskel--snippet-insert))
-  "Completions for `use-package' keywords.")
+(defcustom elskel-use-package-keyword-completions '((":demand" nil t)
+                                                     (":defer" nil t)
+                                                     (":straight" . elskel--straight-keyword-complete))
+  "Completions for `use-package' keywords, with optional custom functions.
 
-(defun elskel--manpage-cands ()
+A list of cons cells where each cell contains a `use-package' keyword and its
+completion function or a list of symbols.
+
+Each cons cell in the list has a `use-package' keyword as the car (a string
+starting with a colon) and either a function or a list of symbols as the cdr.
+
+The function should return string to insert while the list of symbols represents
+possible values for the keyword."
+  :group 'elskel
+  :type '(alist
+          :key-type string
+          :value-type
+          (radio
+           (function :tag "Function")
+           (repeat
+            (symbol :tag "Symbol")))))
+
+(defcustom elskel-simple-data-type-descriptions '(("sexp" . "The value may be any Lisp object that can be printed and read back. You can use ‘sexp’ as a fall-back for any option, if you don’t want to take the time to work out a more specific type to use.")
+                                        ("integer" . "The value must be an integer.")
+                                        ("natnum" . "The value must be a nonnegative integer.")
+                                        ("number" . "The value must be a number (floating point or integer).")
+                                        ("float" . "The value must be floating point.")
+                                        ("string" . "The value must be a string. The customization buffer shows the string without delimiting ‘\"’ characters or ‘\\’ quotes.")
+                                        ("regexp" . "Like ‘string’ except that the string must be a valid regular expression.")
+                                        ("character" . "The value must be a character code. A character code is actually an integer, but this type shows the value by inserting the character in the buffer, rather than by showing the number.")
+                                        ("file" . "The value must be a file name. The widget provides completion.")
+                                        ("file :must-match t" . "The value must be a file name for an existing file. The widget provides completion.")
+                                        ("directory" . "The value must be a directory. The widget provides completion.")
+                                        ("hook" . "The value must be a list of functions. This customization type is used for hook variables. You can use the ‘:options’ keyword in a hook variable’s ‘defcustom’ to specify a list of functions recommended for use in the hook; *Note Variable Definitions::.")
+                                        ("symbol" . "The value must be a symbol. It appears in the customization buffer as the symbol name. The widget provides completion.")
+                                        ("function" . "The value must be either a lambda expression or a function name. The widget provides completion for function names.")
+                                        ("variable" . "The value must be a variable name. The widget provides completion.")
+                                        ("face" . "The value must be a symbol which is a face name. The widget provides completion.")
+                                        ("boolean" . "The value is boolean—either ‘nil’ or ‘t’. Note that by using ‘choice’ and ‘const’ together (see the next section), you can specify that the value must be ‘nil’ or ‘t’, but also specify the text to describe each value in a way that fits the specific meaning of the alternative.")
+                                        ("key" . "The value is a valid key according to ‘key-valid-p’, and suitable for use with, for example ‘keymap-set’.")
+                                        ("key-sequence" . "The value is a key sequence. The customization buffer shows the key sequence using the same syntax as the ‘kbd’ function. *Note Key Sequences::. This is a legacy type; use ‘key’ instead.")
+                                        ("coding-system" . "The value must be a coding-system name, and you can do completion with ‘M-<TAB>’.")
+                                        ("color" . "The value must be a valid color name. The widget provides completion for color names, as well as a sample and a button for selecting a color name from a list of color names shown in a ‘*Colors*’ buffer.")
+                                        ("fringe-bitmap" . "The value must be a valid fringe bitmap name. The widget provides completion."))
+  "Alist of simple data types for custom variables with descriptions.
+
+A list of simple customization types, each associated with a description of the
+expected value.
+
+Each element in the list is a cons cell, where the car is a string representing
+the type, and the cdr is a string describing the expected value for that type."
+  :group 'elskel
+  :type '(alist
+          :key-type string
+          :value-type string))
+
+(defcustom elskel-compound-data-type-descriptions '(("cons" . "(cons CAR-TYPE CDR-TYPE) The value must be a cons cell, its CAR must fit CAR-TYPE, and its CDR must fit CDR-TYPE. For example, ‘(cons string symbol)’ is a customization type which matches values such as ‘(\"foo\" . foo)’. In the customization buffer, the CAR and CDR are displayed and edited separately, each according to their specified type.")
+                                           ("list" . "(list ELEMENT-TYPES...) The value must be a list with exactly as many elements as the ELEMENT-TYPES given; and each element must fit the corresponding ELEMENT-TYPE. For example, ‘(list integer string function)’ describes a list of three elements; the first element must be an integer, the second a string, and the third a function. In the customization buffer, each element is displayed and edited separately, according to the type specified for it.")
+                                           ("group" . "(group ELEMENT-TYPES...) This works like ‘list’ except for the formatting of text in the Custom buffer. ‘list’ labels each element value with its tag; ‘group’ does not.")
+                                           ("vector" . "(vector ELEMENT-TYPES...) Like ‘list’ except that the value must be a vector instead of a list. The elements work the same as in ‘list’.")
+                                           ("alist" . "(alist :key-type KEY-TYPE :value-type VALUE-TYPE) The value must be a list of cons-cells, the CAR of each cell representing a key of customization type KEY-TYPE, and the CDR of the same cell representing a value of customization type VALUE-TYPE. The user can add and delete key/value pairs, and edit both the key and the value of each pair. If omitted, KEY-TYPE and VALUE-TYPE default to ‘sexp’. The user can add any key matching the specified key type, but you can give some keys a preferential treatment by specifying them with the ‘:options’ (*note Variable Definitions::). The specified keys will always be shown in the customize buffer (together with a suitable value), with a checkbox to include or exclude or disable the key/value pair from the alist. The user will not be able to edit the keys specified by the ‘:options’ keyword argument. The argument to the ‘:options’ keywords should be a list of specifications for reasonable keys in the alist. Ordinarily, they are simply atoms, which stand for themselves. For example: :options '(\"foo\" \"bar\" \"baz\") specifies that there are three known keys, namely ‘\"foo\"’, ‘\"bar\"’ and ‘\"baz\"’, which will always be shown first. You may want to restrict the value type for specific keys, for example, the value associated with the ‘\"bar\"’ key can only be an integer. You can specify this by using a list instead of an atom in the list. The first element will specify the key, like before, while the second element will specify the value type. For example: :options '(\"foo\" (\"bar\" integer) \"baz\") Finally, you may want to change how the key is presented. By default, the key is simply shown as a ‘const’, since the user cannot change the special keys specified with the ‘:options’ keyword. However, you may want to use a more specialized type for presenting the key, like ‘function-item’ if you know it is a symbol with a function binding. This is done by using a customization type specification instead of a symbol for the key. :options '(\"foo\" ((function-item some-function) integer) \"baz\") Many alists use lists with two elements, instead of cons cells. For example, (defcustom list-alist '((\"foo\" 1) (\"bar\" 2) (\"baz\" 3)) \"Each element is a list of the form (KEY VALUE).\") instead of (defcustom cons-alist '((\"foo\" . 1) (\"bar\" . 2) (\"baz\" . 3)) \"Each element is a cons-cell (KEY . VALUE).\") Because of the way lists are implemented on top of cons cells, you can treat ‘list-alist’ in the example above as a cons cell alist, where the value type is a list with a single element containing the real value. (defcustom list-alist '((\"foo\" 1) (\"bar\" 2) (\"baz\" 3)) \"Each element is a list of the form (KEY VALUE).\" :type '(alist :value-type (group integer))) The ‘group’ widget is used here instead of ‘list’ only because the formatting is better suited for the purpose. Similarly, you can have alists with more values associated with each key, using variations of this trick: (defcustom person-data '((\"brian\" 50 t) (\"dorith\" 55 nil) (\"ken\" 52 t)) \"Alist of basic info about people. Each element has the form (NAME AGE MALE-FLAG).\" :type '(alist :value-type (group integer boolean)))")
+                                           ("alist :key-type string :value-type string" . "Alist")
+                                           ("plist :key-type string :value-type string" . "Plist")
+                                           ("plist" . "(plist :key-type KEY-TYPE :value-type VALUE-TYPE) This customization type is similar to ‘alist’ (see above), except that (i) the information is stored as a property list, (*note Property Lists::), and (ii) KEY-TYPE, if omitted, defaults to ‘symbol’ rather than ‘sexp’.")
+                                           ("choice" . "(choice ALTERNATIVE-TYPES...) The value must fit one of ALTERNATIVE-TYPES. For example, ‘(choice integer string)’ allows either an integer or a string. In the customization buffer, the user selects an alternative using a menu, and can then edit the value in the usual way for that alternative. Normally the strings in this menu are determined automatically from the choices; however, you can specify different strings for the menu by including the ‘:tag’ keyword in the alternatives. For example, if an integer stands for a number of spaces, while a string is text to use verbatim, you might write the customization type this way, (choice (integer :tag \"Number of spaces\") (string :tag \"Literal text\")) so that the menu offers ‘Number of spaces’ and ‘Literal text’. In any alternative for which ‘nil’ is not a valid value, other than a ‘const’, you should specify a valid default for that alternative using the ‘:value’ keyword. *Note Type Keywords::. If some values are covered by more than one of the alternatives, customize will choose the first alternative that the value fits. This means you should always list the most specific types first, and the most general last. Here’s an example of proper usage: (choice (const :tag \"Off\" nil) symbol (sexp :tag \"Other\")) This way, the special value ‘nil’ is not treated like other symbols, and symbols are not treated like other Lisp expressions.")
+                                           ("radio" . "(radio ELEMENT-TYPES...) This is similar to ‘choice’, except that the choices are displayed using radio buttons rather than a menu. This has the advantage of displaying documentation for the choices when applicable and so is often a good choice for a choice between constant functions (‘function-item’ customization types).")
+                                           ("const" . "(const VALUE) The value must be VALUE—nothing else is allowed. The main use of ‘const’ is inside of ‘choice’. For example, ‘(choice integer (const nil))’ allows either an integer or ‘nil’. ‘:tag’ is often used with ‘const’, inside of ‘choice’. For example, (choice (const :tag \"Yes\" t) (const :tag \"No\" nil) (const :tag \"Ask\" foo)) describes a variable for which ‘t’ means yes, ‘nil’ means no, and ‘foo’ means “ask”.")
+                                           ("other" . "(other VALUE) This alternative can match any Lisp value, but if the user chooses this alternative, that selects the value VALUE. The main use of ‘other’ is as the last element of ‘choice’. For example, (choice (const :tag \"Yes\" t) (const :tag \"No\" nil) (other :tag \"Ask\" foo)) describes a variable for which ‘t’ means yes, ‘nil’ means no, and anything else means “ask”. If the user chooses ‘Ask’ from the menu of alternatives, that specifies the value ‘foo’; but any other value (not ‘t’, ‘nil’ or ‘foo’) displays as ‘Ask’, just like ‘foo’.")
+                                           ("function-item" . "(function-item FUNCTION) Like ‘const’, but used for values which are functions. This displays the documentation string as well as the function name. The documentation string is either the one you specify with ‘:doc’, or FUNCTION’s own documentation string.")
+                                           ("variable-item" . "(variable-item VARIABLE) Like ‘const’, but used for values which are variable names. This displays the documentation string as well as the variable name. The documentation string is either the one you specify with ‘:doc’, or VARIABLE’s own documentation string.")
+                                           ("set" . "(set TYPES...) The value must be a list, and each element of the list must match one of the TYPES specified. This appears in the customization buffer as a checklist, so that each of TYPES may have either one corresponding element or none. It is not possible to specify two different elements that match the same one of TYPES. For example, ‘(set integer symbol)’ allows one integer and/or one symbol in the list; it does not allow multiple integers or multiple symbols. As a result, it is rare to use nonspecific types such as ‘integer’ in a ‘set’. Most often, the TYPES in a ‘set’ are ‘const’ types, as shown here: (set (const :bold) (const :italic)) Sometimes they describe possible elements in an alist: (set (cons :tag \"Height\" (const height) integer) (cons :tag \"Width\" (const width) integer)) That lets the user specify a height value optionally and a width value optionally.")
+                                           ("repeat" . "(repeat ELEMENT-TYPE) The value must be a list and each element of the list must fit the type ELEMENT-TYPE. This appears in the customization buffer as a list of elements, with ‘[INS]’ and ‘[DEL]’ buttons for adding more elements or removing elements.")
+                                           ("restricted-sexp :match-alternatives (symbolp keymapp)" . "(restricted-sexp :match-alternatives CRITERIA) This is the most general composite type construct. The value may be any Lisp object that satisfies one of CRITERIA. CRITERIA should be a list, and each element should be one of these possibilities:"))
+  "Alist of composite types for custom variables with descriptions.
+
+Each entry in the list is a cons cell where the car is a string representing the
+composite type, and the cdr is a string describing how to use that type."
+  :group 'elskel
+  :type '(alist
+          :key-type string
+          :value-type string))
+
+(defcustom elskel-custom-option-keywords '((":value" . "Provide a default value. If ‘nil’ is not a valid value for the alternative, then it is essential to specify a valid default with ‘:value’. If you use this for a type that appears as an alternative inside of ‘choice’; it specifies the default value to use, at first, if and when the user selects this alternative with the menu in the customization buffer. Of course, if the actual value of the option fits this alternative, it will appear showing the actual value, not DEFAULT.")
+                                    (":format \"%v\"" . "This string will be inserted in the buffer to represent the value corresponding to the type. The following ‘%’ escapes are available for use in FORMAT-STRING.")
+                                    (":tag \"TAG\"" . "Use TAG (a string) as the tag for the value (or part of the value) that corresponds to this type.")
+                                    (":doc \"DOC\"" . "Use DOC as the documentation string for this value (or part of the value) that corresponds to this type. In order for this to work, you must specify a value for ‘:format’, and use ‘%d’ or ‘%h’ in that value. The usual reason to specify a documentation string for a type is to provide more information about the meanings of alternatives inside a ‘choice’ type or the parts of some other composite type.")
+                                    (":help-echo \"MOTION-DOC\"" . "When you move to this item with ‘widget-forward’ or ‘widget-backward’, it will display the string MOTION-DOC in the echo area. In addition, MOTION-DOC is used as the mouse ‘help-echo’ string and may actually be a function or form evaluated to yield a help string. If it is a function, it is called with one argument, the widget.")
+                                    (":match (lambda (widget value) )" . "Specify how to decide whether a value matches the type. The corresponding value, FUNCTION, should be a function that accepts two arguments, a widget and a value; it should return non-‘nil’ if the value is acceptable.")
+                                    (":match-alternatives (symbolp keymapp)")
+                                    (":match-inline (lambda (widget inline-value))" . "Specify how to decide whether an inline value matches the type. The corresponding value, FUNCTION, should be a function that accepts two arguments, a widget and an inline value; it should return non-‘nil’ if the value is acceptable. See *note Splicing into Lists:: for more information about inline values.")
+                                    (":action ACTION" . "Perform ACTION if the user clicks on a button.")
+                                    (":button-face FACE" . "Use the face FACE (a face name or a list of face names) for button text displayed with ‘%[...%]’.")
+                                    (":button-prefix \"PREFIX\"" . "")
+                                    (":button-suffix \"SUFFIX\"" . "These specify the text to display before and after a button. Each can be: ‘nil’ No text is inserted. a string The string is inserted literally. a symbol The symbol’s value is used.")
+                                    (":validate (lambda (widget) (unless (widget-value widget) (widget-put widget :error \"Invalid value\") widget))" . "Specify a validation function for input. FUNCTION takes a widget as an argument, and should return ‘nil’ if the widget’s current value is valid for the widget. Otherwise, it should return the widget containing the invalid data, and set that widget’s ‘:error’ property to a string explaining the error.")
+                                    (":type-error \"STRING\"" . "STRING should be a string that describes why a value doesn’t match the type, as determined by the ‘:match’ function. When the ‘:match’ function returns ‘nil’, the widget’s ‘:error’ property will be set to STRING."))
+  "Alist of keyword-value pairs for customizing elements to complete.
+
+A list of keyword-value pairs for customizing the behavior of a widget or
+option. Each keyword is a string that starts with a colon, followed by a value
+that specifies how the widget should behave or be displayed."
+  :group 'elskel
+  :type '(alist
+          :key-type string
+          :value-type (choice string symbol)))
+
+(defcustom elskel-format-specification-alist '(("%[BUTTON%]" . "Display the text BUTTON marked as a button")
+                                                ("%{SAMPLE%}" . "This string will be inserted in the buffer to represent the value corresponding to the type. The following ‘%’ escapes are available for use in FORMAT-STRING.")
+                                                ("%d" . "Substitute the item’s documentation string")
+                                                ("%h" . "Substitute the first line of item’s documentation string")
+                                                ("%v" . "Substitute the item’s value")
+                                                ("%t" . "Substitute the tag here")
+                                                ("%%" . "Display a literal ‘%’"))
+  "An alist mapping format specification keywords to complete.
+
+An alist mapping format specification keywords to their descriptions, used for
+customizing the display of certain elements in a buffer. Each element of the
+alist is a cons cell where the car is a string representing the format
+specification keyword and the cdr is a string describing what the keyword will
+be substituted with when formatting text."
+  :group 'elskel
+  :type '(alist
+          :key-type string
+          :value-type string))
+
+
+(defun elskel--straight-keyword-complete ()
+  "Offer completion for repository type and return selection."
+  (let* ((choices
+          '("git"
+            "built-in"
+            "nil"))
+         (result (completing-read ":type\s" choices)))
+    (pcase result
+      ("built-in"
+       (prin1-to-string
+        '(:type
+          built-in)))
+      ("git"
+       (require 'gh-repo
+                nil
+                t)
+       (let ((user
+              (ignore-errors
+                (car
+                 (process-lines
+                  "git"
+                  "config"
+                  "user.email")))))
+         (prin1-to-string
+          (if
+              (and
+               user
+               (yes-or-no-p
+                (format
+                 "Repo of %s?"
+                 user)))
+              `(:repo
+                ,(substring-no-properties
+                  (if
+                      (fboundp
+                       'gh-repo-read-user-repo)
+                      (gh-repo-read-user-repo
+                       "Repo:"
+                       'identity)
+                    (read-string
+                     "Repo: ")))
+                :type
+                git
+                :flavor
+                nil
+                :host
+                github)
+            (let ((repo
+                   (if
+                       (fboundp
+                        'gh-repo-search-repos)
+                       (gh-repo-search-repos "+language:elisp")
+                     (read-string
+                      "Repo: "))))
+              `(:repo ,repo
+                :type
+                git
+                :flavor
+                nil
+                :host
+                github))))))
+      (_
+       result))))
+
+(defun elskel--candidate-man-pages ()
   "Generate candidates for man page completion."
   (require 'man)
   (with-temp-buffer
@@ -120,7 +253,7 @@
                     (replace-regexp-in-string "[(][0-9]+[)]" "" it))))
                 (Man-parse-man-k))))))
 
-(defun elskel--info-manual ()
+(defun elskel--select-info-manual ()
   "Display a prompt to choose an Info manual name."
   (require 'info)
   (progn
@@ -153,7 +286,7 @@
         (error))
       sexps)))
 
-(defun elskel--transient-prefix-slots ()
+(defun elskel--default-transient-prefix-slots ()
   "Generate alist of transient prefix slot defaults."
   (let* ((alist (list
                  (cons :transient-suffix
@@ -164,8 +297,8 @@
                  (cons :incompatible '("'()"))
                  (cons :refresh-suffixes
                        '("t" "nil"))
-                 (cons :man-page #'elskel--manpage-cands)
-                 (cons :info-manual #'elskel--info-manual)
+                 (cons :man-page #'elskel--candidate-man-pages)
+                 (cons :info-manual #'elskel--select-info-manual)
                  (cons :suffix-description
                        (list
                         "#'transient-command-summary-or-name")))))
@@ -173,16 +306,16 @@
                   (unless (assq curr acc)
                     (push (cons curr nil) acc))
                   acc)
-                (mapcar #'car (elskel--complete-get-class-initargs
+                (mapcar #'car (elskel--get-class-initialization-arguments
                                'transient-prefix))
                 alist)))
 
-(defun elskel--complete-transient-slots ()
+(defun elskel--autocomplete-transient-prefix-slots ()
   "Fill in transient prefix slots with completion."
   (pcase (elskel--get-sexps-backward)
     (`(transient-define-prefix ,(pred (symbolp)) ,(pred (listp)) . ,body)
      (let* ((form (car (last body)))
-            (tslots (elskel--transient-prefix-slots))
+            (tslots (elskel--default-transient-prefix-slots))
             (slots (assq form tslots)))
        (cond ((and (consp slots)
                    (functionp (cdr slots)))
@@ -226,7 +359,7 @@
                 (elskel--insert
                  (concat cand (if (looking-at " ")  "" " "))))))))))
 
-(defun elskel--complete-get-class-initargs (sym)
+(defun elskel--get-class-initialization-arguments (sym)
   "Extract class slot initialization arguments.
 
 Argument SYM is a symbol representing the class for which to retrieve
@@ -259,7 +392,7 @@ initialization arguments."
                                   props))))
                     slots))))
 
-(defun elskel-minibuffer-get-metadata ()
+(defun elskel-minibuffer-completion-metadata ()
   "Retrieve metadata for minibuffer completion."
   (completion-metadata
    (buffer-substring-no-properties
@@ -269,7 +402,7 @@ initialization arguments."
    minibuffer-completion-table
    minibuffer-completion-predicate))
 
-(defun elskel-minibuffer-ivy-selected-cand ()
+(defun elskel-minibuffer-ivy-selected-candidate ()
   "Get selected candidate or text from Ivy minibuffer."
   (when (and (memq 'ivy--queue-exhibit post-command-hook)
              (boundp 'ivy-text)
@@ -278,7 +411,7 @@ initialization arguments."
              (fboundp 'ivy--expand-file-name)
              (fboundp 'ivy-state-current))
     (cons
-     (completion-metadata-get (ignore-errors (elskel-minibuffer-get-metadata))
+     (completion-metadata-get (ignore-errors (elskel-minibuffer-completion-metadata))
                               'category)
      (ivy--expand-file-name
       (if (and (> ivy--length 0)
@@ -286,7 +419,7 @@ initialization arguments."
           (ivy-state-current ivy-last)
         ivy-text)))))
 
-(defun elskel-minibuffer-get-default-candidates ()
+(defun elskel-minibuffer-default-candidates ()
   "Retrieve default completion candidates from the minibuffer."
   (when (minibufferp)
     (let* ((all (completion-all-completions
@@ -298,14 +431,14 @@ initialization arguments."
            (last (last all)))
       (when last (setcdr last nil))
       (cons
-       (completion-metadata-get (elskel-minibuffer-get-metadata) 'category)
+       (completion-metadata-get (elskel-minibuffer-completion-metadata) 'category)
        all))))
 
-(defun elskel-get-minibuffer-get-default-completion ()
+(defun elskel-minibuffer-default-completion ()
   "Retrieve default completion from minibuffer."
   (when (and (minibufferp) minibuffer-completion-table)
     (pcase-let* ((`(,category . ,candidates)
-                  (elskel-minibuffer-get-default-candidates))
+                  (elskel-minibuffer-default-candidates))
                  (contents (minibuffer-contents))
                  (top (if (test-completion contents
                                            minibuffer-completion-table
@@ -320,16 +453,16 @@ initialization arguments."
                              (car completions)))))))
       (cons category (or (car (member top candidates)) top)))))
 
-(defvar elskel-minibuffer-targets-finders
-  '(elskel-minibuffer-ivy-selected-cand
-    elskel-get-minibuffer-get-default-completion)
+(defvar elskel-minibuffer-candidate-finders
+  '(elskel-minibuffer-ivy-selected-candidate
+    elskel-minibuffer-default-completion)
   "List of functions to find minibuffer completion targets.")
 
-(defun elskel-minibuffer-get-current-candidate ()
+(defun elskel-minibuffer-current-candidate ()
   "Retrieve the current candidate from the minibuffer."
   (let (target)
     (run-hook-wrapped
-     'elskel-minibuffer-targets-finders
+     'elskel-minibuffer-candidate-finders
      (lambda (fun)
        (when-let ((result (funcall fun)))
          (when (and (cdr-safe result)
@@ -391,7 +524,7 @@ inherits the current input method."
                           (pcase-let
                               ((`(,_category .
                                   ,current)
-                                (elskel-minibuffer-get-current-candidate)))
+                                (elskel-minibuffer-current-candidate)))
                             (with-minibuffer-selected-window
                               (cond ((or (not prev)
                                          (not (string=
@@ -473,7 +606,7 @@ property list."
           (overlay-put overlay prop-name val))))
     overlay))
 
-(defun elskel--complete-alist (base-prompt alist &rest args)
+(defun elskel--autocomplete-from-alist (base-prompt alist &rest args)
   "Merge user choices into a result list from ALIST.
 
 Argument BASE-PROMPT is a string used as the base for the interactive prompt.
@@ -527,7 +660,7 @@ Remaining arguments ARGS are additional arguments passed to `completing-read'."
       (setq result
             (reverse result)))))
 
-(defun elskel--shared-start (s1 s2)
+(defun elskel--common-prefix (s1 s2)
   "Find common prefix of strings S1 and S2.
 
 Argument S1 is a string to compare with S2.
@@ -588,28 +721,28 @@ Argument S2 is a string to compare with S1."
           (push (symbol-name symb) syms)))
       syms)))
 
-(defun elskel--guess-def-name ()
+
+
+(defun elskel--infer-definition-prefix ()
   "Guess and return the common prefix for definition names."
-  (let ((prefix (or
-                 (elskel--provided-name)
-                 (let ((strings (elskel--get-def-names)))
-                   (seq-reduce (lambda (acc it)
-                                 (let ((prefix (elskel--shared-start acc it)))
-                                   (if (string-empty-p prefix)
-                                       acc
-                                     prefix)))
-                               strings
-                               (pop strings)))
-                 (replace-regexp-in-string "[^a-z]" "-"
-                                           (replace-regexp-in-string
-                                            "\\.[a-z]+$" (buffer-name
-                                                          (current-buffer))
-                                            "")))))
-    (if (and
-         (not (string= "-" prefix))
-         (string-suffix-p "-" prefix))
-        prefix
-      (format "%s-" prefix))))
+  (or (elskel--provided-name)
+      (let ((prefix (or
+                     (let ((strings (elskel--get-def-names)))
+                       (seq-reduce (lambda (acc it)
+                                     (let
+                                         ((prefix (elskel--common-prefix acc it)))
+                                       (if (string-empty-p prefix)
+                                           acc
+                                         prefix)))
+                                   strings
+                                   (pop strings)))
+                     (replace-regexp-in-string
+                      "[][\s\t\n\r\f*'\")(]+"
+                      (lambda (s)
+                        (if (string-empty-p (string-trim s)) "-" ""))
+                      (file-name-base (buffer-name))))))
+        (replace-regexp-in-string "[-]+$" ""
+                                  prefix))))
 
 (defun elskel--quoted-symbol-or-function (sexp)
   "Extract symbol from quoted or sharp-quoted expression.
@@ -621,7 +754,7 @@ Argument SEXP is an s-expression to be analyzed for a quoted symbol or function.
     (`(quote ,(and (pred (symbolp)) sym))
      sym)))
 
-(defun elskel--command-from-define-key (sexp)
+(defun elskel--command-symbol-from-define-key (sexp)
   "Extract command symbol from `define-key' form.
 
 Argument SEXP is an s-expression representing a call to `define-key'."
@@ -635,7 +768,7 @@ Argument SEXP is an s-expression representing a call to `define-key'."
          `(quote ,(and (pred (symbolp)) sym))))
      sym)))
 
-(defun elskel--looks-like-keymapp (sexp)
+(defun elskel--is-keymap-definition (sexp)
   "Check if SEXP is a keymap definition.
 
 Argument SEXP is an S-expression to analyze for keymap patterns."
@@ -654,7 +787,7 @@ Argument SEXP is an S-expression to analyze for keymap patterns."
                      (butlast body)))))
         . ,_rest)
      (cons name
-           (delq nil (mapcar #'elskel--command-from-define-key body))))
+           (delq nil (mapcar #'elskel--command-symbol-from-define-key body))))
     (`(defvar-keymap ,(and (pred symbolp) name)
        . ,rest)
      (let ((body (reverse rest))
@@ -715,7 +848,7 @@ defaulting to 1."
   "Generate completions for `use-package' keywords."
   (seq-uniq
    (append
-    elskel--use-package--keywords-completions
+    elskel-use-package-keyword-completions
     (mapcar
      (lambda (it)
        (list (symbol-name it)))
@@ -725,126 +858,24 @@ defaulting to 1."
      (string= (car a)
               (car b)))))
 
-(define-skeleton elskel-defcustom-skeleton
-  "Insert a customizable option with documentation and type."
-  "Custom Name: "
-  "(defcustom " (file-name-base (buffer-file-name)) "-" str " nil"
-  > \n "\"Doc.\""
-  \n >
-  ":group '" (file-name-base (buffer-file-name))
-  \n > ":type '(repeat string))")
-
-(define-skeleton elskel-defvar-local-skeleton
-  "Create a `defvar-local' skeleton with buffer-based variable name."
-  "defvar-local"
-  "(defvar-local "  (concat (file-name-base (buffer-name)) "-")
-  _
-  " nil" ")")
-
-(define-skeleton elskel-defvar-skeleton
-  "Create a `defvar' skeleton with a variable name prefix."
-  "defvar"
-  "(defvar "  (concat (file-name-base (buffer-name)) "-")
-  _
-  " nil" ")")
-
-(defun elskel--read-new-name (&optional prompt)
-  "PROMPT for a new name with an optional default.
-
-Optional argument PROMPT is the string presented to the user when asking for
-input. It defaults to a single space \" \"."
-  (read-string
-   (or prompt " ")
-   (replace-regexp-in-string
-    "--$"
-    "-"
-    (format
-     "%s-"
-     (elskel--guess-def-name)))))
-
-(defun elskel--snippet-insert (&optional choice)
+(defun elskel--skeleton-insert ()
   "Insert a predefined code snippet into the buffer.
 
 Optional argument CHOICE is a string representing the user's choice of snippet
 to insert."
-  (let ((choice (or choice
-                    (elskel--completing-read-with-preview
-                     "Insert\s"
-                     elskel--snippets))))
-    (pcase choice
-      ((or "cl-defun" "defun" "defmacro")
-       (insert
-        (format "(%s %s ())" choice (elskel--read-new-name (concat choice
-                                                                   "\s"))))
-       (forward-char -1)
-       (newline-and-indent))
-      ("defvar"
-       (call-interactively 'elskel-defvar-skeleton))
-      ("defvar-local"
-       (call-interactively 'elskel-defvar-local-skeleton))
-      ("defcustom"
-       (call-interactively 'elskel-defcustom-skeleton))
-      ("use-package"
-       (require 'straight-extra nil t)
-       (when (fboundp 'straight-extra-insert-use-package-at-point)
-         (straight-extra-insert-use-package-at-point)))
-      ("advice-add"
-       (let* ((alist
-               (mapcar (lambda (it)
-                         (let ((descr (format "%s" (cdr it))))
-                           (cons (format "%s"(car it))
-                                 (if-let ((pos (string-match
-                                                "(lambda ("
-                                                descr)))
-                                     (substring descr pos
-                                                (1-
-                                                 (length
-                                                  descr)))
-                                   descr))))
-                       advice--how-alist))
-              (annotf
-               (lambda (str)
-                 (concat " " (or (cdr (assoc str alist)) ""))))
-              (cycle-sort-fn (lambda (it) it))
-              (display-sort-fn (lambda (it)
-                                 (seq-sort-by #'length '> it)))
-              (cand (completing-read
-                     "Candidates: "
-                     (lambda (str pred action)
-                       (if (eq action 'metadata)
-                           `(metadata
-                             (annotation-function .
-                              ,annotf)
-                             (cycle-sort-function .
-                              ,cycle-sort-fn)
-                             (display-sort-function
-                              . ,display-sort-fn))
-                         (complete-with-action
-                          action alist str pred)))))
-              (fn (cdr (assoc cand alist))))
-         (insert
-          "\n"(concat (replace-regexp-in-string "^(lambda "
-                                                (format
-                                                 "(defun %s"
-                                                 (elskel--read-new-name (concat
-                                                                         choice
-                                                                         "\s")))
-                                                (downcase fn))
-                      "\n"
-                      (format "(advice-add %s #'%s)"  cand
-                              (elskel--read-new-name (concat choice "\s")))))
-         (re-search-backward "advice-add" nil t 1)
-         (skip-chars-forward "a-z-")
-         (insert "\s")))
-      ("lambda" (insert (format "(lambda (%s) )" (read-string "Argument: ")))
-       (forward-char -1))
-      ("transient-define-prefix"
-       (insert (format
-                "(transient-define-prefix %s ())"
-                (elskel--read-new-name (concat choice "\s"))))
-       (forward-char -1)
-       (newline-and-indent)
-       (insert "\"\"")))))
+  (let* ((alist (mapcar (lambda (it)
+                          (ignore-errors
+                            (cons (get it 'elskel-skeleton)
+                                  it)))
+                        elskel-skeletons-skels))
+         (skeleton (elskel--completing-read-with-preview
+                    "Insert\s"
+                    (mapcar #'car alist)
+                    nil
+                    nil
+                    nil
+                    t)))
+    (call-interactively (cdr (assoc-string skeleton alist)))))
 
 (defun elskel--get-completion-prefix (item)
   "Extract prefix for completion from ITEM at point.
@@ -901,7 +932,7 @@ Argument ITEM is a string that will be inserted into the buffer."
                                   (car body-list))))
                       (not (eq (car-safe body) 'interactive)))))))))))
 
-(defun elskel--complete-use-package ()
+(defun elskel--autocomplete-use-package-keywords ()
   "Autocomplete `use-package' keywords and insert them."
   (setq elskel--use-package-keywords-completions
         (elskel--use-package-keywords-completions-alist))
@@ -911,12 +942,12 @@ Argument ITEM is a string that will be inserted into the buffer."
            (symbol-name s))))
     (cond ((and prefix (member prefix words))
            (insert "\s")
-           (elskel--complete-use-package))
+           (elskel--autocomplete-use-package-keywords))
           ((and prefix
                 (all-completions prefix words))
            (elskel--insert (string-join
                             (flatten-list
-                             (elskel--complete-alist
+                             (elskel--autocomplete-from-alist
                               prefix
                               (seq-filter (pcase-lambda (`(,k . ,_v))
                                             (string-prefix-p prefix k))
@@ -939,25 +970,25 @@ Argument ITEM is a string that will be inserted into the buffer."
                                (> (length sublist) 0))
                           (string-join
                            (flatten-list
-                            (elskel--complete-alist "Sublist" sublist))
+                            (elskel--autocomplete-from-alist "Sublist" sublist))
                            "\s")))))
              (when (stringp choice)
                (insert choice))))
           (t (insert
               (string-join
                (flatten-list
-                (elskel--complete-alist
+                (elskel--autocomplete-from-alist
                  "Complete: "
                  elskel--use-package-keywords-completions))
                "\s"))))))
 
-(defun elskel--complete-inside-args ()
+(defun elskel--insert-function-argument-with-completion ()
   "Insert a Lisp argument with completion."
   (let ((prefix
          (when-let ((sym (symbol-at-point)))
            (format "%s" sym)))
         (args (save-excursion
-                (elskel--backward-up-list)
+                (elskel--goto-outer-list)
                 (sexp-at-point)))
         (collection '(&optional &rest &key
                       item
@@ -984,7 +1015,7 @@ Argument ITEM is a string that will be inserted into the buffer."
           choice
           (if (string-prefix-p "&" choice) " " "")))))))
 
-(defun elskel--inside-args-p ()
+(defun elskel--is-within-function-arguments ()
   "Check if point is within function arguments."
   (save-excursion
     (and (elskel--complete-forward-with #'backward-up-list 1)
@@ -998,14 +1029,14 @@ Argument ITEM is a string that will be inserted into the buffer."
                             defclass cl-defmethod))
                     (not (elskel--complete-forward-with #'backward-sexp 1))))))))
 
-(defun elskel--backward-up-list (&optional arg)
+(defun elskel--goto-outer-list (&optional arg)
   "Move backward out of one level of parentheses.
 
 Optional argument ARG is the number of levels to go up in the list structure; it
 defaults to 1."
   (elskel--complete-forward-with 'backward-up-list arg))
 
-(defun elskel--substitute-map ()
+(defun elskel--insert-keymap-with-completion ()
   "Insert keymap strings with completion into the buffer."
   (interactive)
   (let* ((alist (mapcan
@@ -1020,14 +1051,14 @@ defaults to 1."
                                      (concat prefix (format "\\\\[%s] `%s'"
                                                             c c)))
                                    cmds))))
-                 (elskel--read-with #'elskel--looks-like-keymapp
-                                    #'elskel--looks-like-keymapp))))
+                 (elskel--read-with #'elskel--is-keymap-definition
+                                    #'elskel--is-keymap-definition))))
     (insert (or (elskel--completing-read-with-preview
                  "Keymap: "
                  alist)
                 ""))))
 
-(defun elskel--complete-custom-type ()
+(defun elskel--insert-initial-defcustom-type ()
   "Insert custom type with completion for `defcustom'."
   (let* ((prefix
           (let* ((ppss (syntax-ppss (point)))
@@ -1107,75 +1138,9 @@ defaults to 1."
                   choice)))
       (indent-sexp))))
 
-(defvar elskel--simple-custom-types
-  '(("sexp" . "The value may be any Lisp object that can be printed and read back. You can use ‘sexp’ as a fall-back for any option, if you don’t want to take the time to work out a more specific type to use.")
-    ("integer" . "The value must be an integer.")
-    ("natnum" . "The value must be a nonnegative integer.")
-    ("number" . "The value must be a number (floating point or integer).")
-    ("float" . "The value must be floating point.")
-    ("string" . "The value must be a string. The customization buffer shows the string without delimiting ‘\"’ characters or ‘\\’ quotes.")
-    ("regexp" . "Like ‘string’ except that the string must be a valid regular expression.")
-    ("character" . "The value must be a character code. A character code is actually an integer, but this type shows the value by inserting the character in the buffer, rather than by showing the number.")
-    ("file" . "The value must be a file name. The widget provides completion.")
-    ("file :must-match t" . "The value must be a file name for an existing file. The widget provides completion.")
-    ("directory" . "The value must be a directory. The widget provides completion.")
-    ("hook" . "The value must be a list of functions. This customization type is used for hook variables. You can use the ‘:options’ keyword in a hook variable’s ‘defcustom’ to specify a list of functions recommended for use in the hook; *Note Variable Definitions::.")
-    ("symbol" . "The value must be a symbol. It appears in the customization buffer as the symbol name. The widget provides completion.")
-    ("function" . "The value must be either a lambda expression or a function name. The widget provides completion for function names.")
-    ("variable" . "The value must be a variable name. The widget provides completion.")
-    ("face" . "The value must be a symbol which is a face name. The widget provides completion.")
-    ("boolean" . "The value is boolean—either ‘nil’ or ‘t’. Note that by using ‘choice’ and ‘const’ together (see the next section), you can specify that the value must be ‘nil’ or ‘t’, but also specify the text to describe each value in a way that fits the specific meaning of the alternative.")
-    ("key" . "The value is a valid key according to ‘key-valid-p’, and suitable for use with, for example ‘keymap-set’.")
-    ("key-sequence" . "The value is a key sequence. The customization buffer shows the key sequence using the same syntax as the ‘kbd’ function. *Note Key Sequences::. This is a legacy type; use ‘key’ instead.")
-    ("coding-system" . "The value must be a coding-system name, and you can do completion with ‘M-<TAB>’.")
-    ("color" . "The value must be a valid color name. The widget provides completion for color names, as well as a sample and a button for selecting a color name from a list of color names shown in a ‘*Colors*’ buffer.")
-    ("fringe-bitmap" . "The value must be a valid fringe bitmap name. The widget provides completion.")))
 
-(defvar elskel--custom-composite-types
-  '(("cons" . "(cons CAR-TYPE CDR-TYPE) The value must be a cons cell, its CAR must fit CAR-TYPE, and its CDR must fit CDR-TYPE. For example, ‘(cons string symbol)’ is a customization type which matches values such as ‘(\"foo\" . foo)’. In the customization buffer, the CAR and CDR are displayed and edited separately, each according to their specified type.")
-    ("list" . "(list ELEMENT-TYPES...) The value must be a list with exactly as many elements as the ELEMENT-TYPES given; and each element must fit the corresponding ELEMENT-TYPE. For example, ‘(list integer string function)’ describes a list of three elements; the first element must be an integer, the second a string, and the third a function. In the customization buffer, each element is displayed and edited separately, according to the type specified for it.")
-    ("group" . "(group ELEMENT-TYPES...) This works like ‘list’ except for the formatting of text in the Custom buffer. ‘list’ labels each element value with its tag; ‘group’ does not.")
-    ("vector" . "(vector ELEMENT-TYPES...) Like ‘list’ except that the value must be a vector instead of a list. The elements work the same as in ‘list’.")
-    ("alist" . "(alist :key-type KEY-TYPE :value-type VALUE-TYPE) The value must be a list of cons-cells, the CAR of each cell representing a key of customization type KEY-TYPE, and the CDR of the same cell representing a value of customization type VALUE-TYPE. The user can add and delete key/value pairs, and edit both the key and the value of each pair. If omitted, KEY-TYPE and VALUE-TYPE default to ‘sexp’. The user can add any key matching the specified key type, but you can give some keys a preferential treatment by specifying them with the ‘:options’ (*note Variable Definitions::). The specified keys will always be shown in the customize buffer (together with a suitable value), with a checkbox to include or exclude or disable the key/value pair from the alist. The user will not be able to edit the keys specified by the ‘:options’ keyword argument. The argument to the ‘:options’ keywords should be a list of specifications for reasonable keys in the alist. Ordinarily, they are simply atoms, which stand for themselves. For example: :options '(\"foo\" \"bar\" \"baz\") specifies that there are three known keys, namely ‘\"foo\"’, ‘\"bar\"’ and ‘\"baz\"’, which will always be shown first. You may want to restrict the value type for specific keys, for example, the value associated with the ‘\"bar\"’ key can only be an integer. You can specify this by using a list instead of an atom in the list. The first element will specify the key, like before, while the second element will specify the value type. For example: :options '(\"foo\" (\"bar\" integer) \"baz\") Finally, you may want to change how the key is presented. By default, the key is simply shown as a ‘const’, since the user cannot change the special keys specified with the ‘:options’ keyword. However, you may want to use a more specialized type for presenting the key, like ‘function-item’ if you know it is a symbol with a function binding. This is done by using a customization type specification instead of a symbol for the key. :options '(\"foo\" ((function-item some-function) integer) \"baz\") Many alists use lists with two elements, instead of cons cells. For example, (defcustom list-alist '((\"foo\" 1) (\"bar\" 2) (\"baz\" 3)) \"Each element is a list of the form (KEY VALUE).\") instead of (defcustom cons-alist '((\"foo\" . 1) (\"bar\" . 2) (\"baz\" . 3)) \"Each element is a cons-cell (KEY . VALUE).\") Because of the way lists are implemented on top of cons cells, you can treat ‘list-alist’ in the example above as a cons cell alist, where the value type is a list with a single element containing the real value. (defcustom list-alist '((\"foo\" 1) (\"bar\" 2) (\"baz\" 3)) \"Each element is a list of the form (KEY VALUE).\" :type '(alist :value-type (group integer))) The ‘group’ widget is used here instead of ‘list’ only because the formatting is better suited for the purpose. Similarly, you can have alists with more values associated with each key, using variations of this trick: (defcustom person-data '((\"brian\" 50 t) (\"dorith\" 55 nil) (\"ken\" 52 t)) \"Alist of basic info about people. Each element has the form (NAME AGE MALE-FLAG).\" :type '(alist :value-type (group integer boolean)))")
-    ("alist :key-type string :value-type string" . "Alist")
-    ("plist :key-type string :value-type string" . "Plist")
-    ("plist" . "(plist :key-type KEY-TYPE :value-type VALUE-TYPE) This customization type is similar to ‘alist’ (see above), except that (i) the information is stored as a property list, (*note Property Lists::), and (ii) KEY-TYPE, if omitted, defaults to ‘symbol’ rather than ‘sexp’.")
-    ("choice" . "(choice ALTERNATIVE-TYPES...) The value must fit one of ALTERNATIVE-TYPES. For example, ‘(choice integer string)’ allows either an integer or a string. In the customization buffer, the user selects an alternative using a menu, and can then edit the value in the usual way for that alternative. Normally the strings in this menu are determined automatically from the choices; however, you can specify different strings for the menu by including the ‘:tag’ keyword in the alternatives. For example, if an integer stands for a number of spaces, while a string is text to use verbatim, you might write the customization type this way, (choice (integer :tag \"Number of spaces\") (string :tag \"Literal text\")) so that the menu offers ‘Number of spaces’ and ‘Literal text’. In any alternative for which ‘nil’ is not a valid value, other than a ‘const’, you should specify a valid default for that alternative using the ‘:value’ keyword. *Note Type Keywords::. If some values are covered by more than one of the alternatives, customize will choose the first alternative that the value fits. This means you should always list the most specific types first, and the most general last. Here’s an example of proper usage: (choice (const :tag \"Off\" nil) symbol (sexp :tag \"Other\")) This way, the special value ‘nil’ is not treated like other symbols, and symbols are not treated like other Lisp expressions.")
-    ("radio" . "(radio ELEMENT-TYPES...) This is similar to ‘choice’, except that the choices are displayed using radio buttons rather than a menu. This has the advantage of displaying documentation for the choices when applicable and so is often a good choice for a choice between constant functions (‘function-item’ customization types).")
-    ("const" . "(const VALUE) The value must be VALUE—nothing else is allowed. The main use of ‘const’ is inside of ‘choice’. For example, ‘(choice integer (const nil))’ allows either an integer or ‘nil’. ‘:tag’ is often used with ‘const’, inside of ‘choice’. For example, (choice (const :tag \"Yes\" t) (const :tag \"No\" nil) (const :tag \"Ask\" foo)) describes a variable for which ‘t’ means yes, ‘nil’ means no, and ‘foo’ means “ask”.")
-    ("other" . "(other VALUE) This alternative can match any Lisp value, but if the user chooses this alternative, that selects the value VALUE. The main use of ‘other’ is as the last element of ‘choice’. For example, (choice (const :tag \"Yes\" t) (const :tag \"No\" nil) (other :tag \"Ask\" foo)) describes a variable for which ‘t’ means yes, ‘nil’ means no, and anything else means “ask”. If the user chooses ‘Ask’ from the menu of alternatives, that specifies the value ‘foo’; but any other value (not ‘t’, ‘nil’ or ‘foo’) displays as ‘Ask’, just like ‘foo’.")
-    ("function-item" . "(function-item FUNCTION) Like ‘const’, but used for values which are functions. This displays the documentation string as well as the function name. The documentation string is either the one you specify with ‘:doc’, or FUNCTION’s own documentation string.")
-    ("variable-item" . "(variable-item VARIABLE) Like ‘const’, but used for values which are variable names. This displays the documentation string as well as the variable name. The documentation string is either the one you specify with ‘:doc’, or VARIABLE’s own documentation string.")
-    ("set" . "(set TYPES...) The value must be a list, and each element of the list must match one of the TYPES specified. This appears in the customization buffer as a checklist, so that each of TYPES may have either one corresponding element or none. It is not possible to specify two different elements that match the same one of TYPES. For example, ‘(set integer symbol)’ allows one integer and/or one symbol in the list; it does not allow multiple integers or multiple symbols. As a result, it is rare to use nonspecific types such as ‘integer’ in a ‘set’. Most often, the TYPES in a ‘set’ are ‘const’ types, as shown here: (set (const :bold) (const :italic)) Sometimes they describe possible elements in an alist: (set (cons :tag \"Height\" (const height) integer) (cons :tag \"Width\" (const width) integer)) That lets the user specify a height value optionally and a width value optionally.")
-    ("repeat" . "(repeat ELEMENT-TYPE) The value must be a list and each element of the list must fit the type ELEMENT-TYPE. This appears in the customization buffer as a list of elements, with ‘[INS]’ and ‘[DEL]’ buttons for adding more elements or removing elements.")
-    ("restricted-sexp :match-alternatives (symbolp keymapp)" . "(restricted-sexp :match-alternatives CRITERIA) This is the most general composite type construct. The value may be any Lisp object that satisfies one of CRITERIA. CRITERIA should be a list, and each element should be one of these possibilities:")))
 
-(defvar elskel-custom-keywords
-  '((":value" . "Provide a default value. If ‘nil’ is not a valid value for the alternative, then it is essential to specify a valid default with ‘:value’. If you use this for a type that appears as an alternative inside of ‘choice’; it specifies the default value to use, at first, if and when the user selects this alternative with the menu in the customization buffer. Of course, if the actual value of the option fits this alternative, it will appear showing the actual value, not DEFAULT.")
-    (":format \"%v\"" . "This string will be inserted in the buffer to represent the value corresponding to the type. The following ‘%’ escapes are available for use in FORMAT-STRING.")
-    (":tag \"TAG\"" . "Use TAG (a string) as the tag for the value (or part of the value) that corresponds to this type.")
-    (":doc \"DOC\"" . "Use DOC as the documentation string for this value (or part of the value) that corresponds to this type. In order for this to work, you must specify a value for ‘:format’, and use ‘%d’ or ‘%h’ in that value. The usual reason to specify a documentation string for a type is to provide more information about the meanings of alternatives inside a ‘choice’ type or the parts of some other composite type.")
-    (":help-echo \"MOTION-DOC\"" . "When you move to this item with ‘widget-forward’ or ‘widget-backward’, it will display the string MOTION-DOC in the echo area. In addition, MOTION-DOC is used as the mouse ‘help-echo’ string and may actually be a function or form evaluated to yield a help string. If it is a function, it is called with one argument, the widget.")
-    (":match (lambda (widget value) )" . "Specify how to decide whether a value matches the type. The corresponding value, FUNCTION, should be a function that accepts two arguments, a widget and a value; it should return non-‘nil’ if the value is acceptable.")
-    (":match-alternatives (symbolp keymapp)")
-    (":match-inline (lambda (widget inline-value))" . "Specify how to decide whether an inline value matches the type. The corresponding value, FUNCTION, should be a function that accepts two arguments, a widget and an inline value; it should return non-‘nil’ if the value is acceptable. See *note Splicing into Lists:: for more information about inline values.")
-    (":action ACTION" . "Perform ACTION if the user clicks on a button.")
-    (":button-face FACE" . "Use the face FACE (a face name or a list of face names) for button text displayed with ‘%[...%]’.")
-    (":button-prefix \"PREFIX\"" . "")
-    (":button-suffix \"SUFFIX\"" . "These specify the text to display before and after a button. Each can be: ‘nil’ No text is inserted. a string The string is inserted literally. a symbol The symbol’s value is used.")
-    (":validate (lambda (widget) (unless (widget-value widget) (widget-put widget :error \"Invalid value\") widget))" . "Specify a validation function for input. FUNCTION takes a widget as an argument, and should return ‘nil’ if the widget’s current value is valid for the widget. Otherwise, it should return the widget containing the invalid data, and set that widget’s ‘:error’ property to a string explaining the error.")
-    (":type-error \"STRING\"" . "STRING should be a string that describes why a value doesn’t match the type, as determined by the ‘:match’ function. When the ‘:match’ function returns ‘nil’, the widget’s ‘:error’ property will be set to STRING.")))
-
-(defvar elskel--custom-format-keyword-alist
-  '(("%[BUTTON%]" . "Display the text BUTTON marked as a button")
-    ("%{SAMPLE%}" . "This string will be inserted in the buffer to represent the value corresponding to the type. The following ‘%’ escapes are available for use in FORMAT-STRING.")
-    ("%d" . "Substitute the item’s documentation string")
-    ("%h" . "Substitute the first line of item’s documentation string")
-    ("%v" . "Substitute the item’s value")
-    ("%t" . "Substitute the tag here")
-    ("%%" . "Display a literal ‘%’")))
-
-(defun elskel--complete-custom-nested-type ()
+(defun elskel--insert-nested-defcustom-type ()
   "Complete nested custom type with annotations."
   (pcase-let* ((`(,type  ,idx)
                 (elisp--fnsym-in-current-sexp))
@@ -1199,7 +1164,7 @@ defaults to 1."
                                  sym))))
                (alist
                 (cond ((eq keyword :format)
-                       elskel--custom-format-keyword-alist)
+                       elskel-format-specification-alist)
                       ((memq keyword '(:tag :help-echo
                                        :button-prefix
                                        :button-suffix
@@ -1208,26 +1173,26 @@ defaults to 1."
                                    "")))
                       ((and is-odd
                             (eq type 'const))
-                       elskel-custom-keywords)
+                       elskel-custom-option-keywords)
                       ((and (not type)
                             (not idx)))
                       ((and idx
                             (zerop idx))
-                       (append elskel--simple-custom-types
-                               elskel--custom-composite-types))
+                       (append elskel-simple-data-type-descriptions
+                               elskel-compound-data-type-descriptions))
                       ((and (assoc-string str-type
-                                          elskel--custom-composite-types))
+                                          elskel-compound-data-type-descriptions))
                        (if is-odd
-                           (append elskel--simple-custom-types
-                                   elskel--custom-composite-types
-                                   elskel-custom-keywords)
-                         (append elskel--simple-custom-types
-                                 elskel--custom-composite-types)))
-                      ((assoc-string str-type elskel--simple-custom-types)
+                           (append elskel-simple-data-type-descriptions
+                                   elskel-compound-data-type-descriptions
+                                   elskel-custom-option-keywords)
+                         (append elskel-simple-data-type-descriptions
+                                 elskel-compound-data-type-descriptions)))
+                      ((assoc-string str-type elskel-simple-data-type-descriptions)
                        (if is-odd
-                           elskel-custom-keywords
-                         (append elskel--simple-custom-types
-                                 elskel--custom-composite-types)))))
+                           elskel-custom-option-keywords
+                         (append elskel-simple-data-type-descriptions
+                                 elskel-compound-data-type-descriptions)))))
                (annotf (lambda (str)
                          (concat " " (or (cdr (assoc-string str alist)) ""))))
                (table (lambda (str pred action)
@@ -1239,11 +1204,11 @@ defaults to 1."
                                   (substring-no-properties
                                    (cond ((or is-in-empty-list
                                               (assoc-string it
-                                                            elskel-custom-keywords))
+                                                            elskel-custom-option-keywords))
                                           it)
                                          ((or
                                            (assoc-string it
-                                                         elskel--custom-format-keyword-alist)
+                                                         elskel-format-specification-alist)
                                            (memq keyword '(:tag :help-echo
                                                            :button-prefix
                                                            :button-suffix
@@ -1264,10 +1229,10 @@ defaults to 1."
 (defun elskel-complete-custom-type ()
   "Insert initial custom type with completion for `defcustom'."
   (if (> (car (syntax-ppss (point))) 1)
-      (elskel--complete-custom-nested-type)
-    (elskel--complete-custom-type)))
+      (elskel--insert-nested-defcustom-type)
+    (elskel--insert-initial-defcustom-type)))
 
-(defun elskel--inside-defcustom-type-p ()
+(defun elskel--is-within-defcustom-type ()
   "Check if point is inside `defcustom' type specification."
   (let* ((ppss (syntax-ppss (point)))
          (depth (car ppss)))
@@ -1298,48 +1263,187 @@ defaults to 1."
           ((> depth 1)
            (when-let ((start (cadr (nth 9 ppss))))
              (goto-char (cadr (nth 9 ppss)))
-             (elskel--inside-defcustom-type-p))))))
+             (elskel--is-within-defcustom-type))))))
 
-(defun elskel--complete-defcustom-type-p ()
+(defun elskel--is-within-defcustom-type-definition ()
   "Check if point is within `defcustom' type specification."
   (save-excursion
-    (elskel--inside-defcustom-type-p)))
+    (elskel--is-within-defcustom-type)))
 
 (defun elskel--inside-string ()
   "Determine if point is inside a string."
   (nth 3 (syntax-ppss (point))))
+
+(defun elskel--rename-definitions (alist)
+  "Rename symbols in buffer based on ALIST.
+
+Argument ALIST is a list of cons cells where each cell contains a symbol and its
+new name to be renamed."
+  (pcase-dolist (`(,sym . ,new-sym) alist)
+    (let ((re (regexp-opt (list (symbol-name sym)) 'symbols))
+          (rep (symbol-name new-sym)))
+      (save-excursion
+        (goto-char (point-max))
+        (while (re-search-backward re nil t 1)
+          (replace-match rep))))))
+
+(defun elskel--alist-p (list)
+  "Non-nil if and only if LIST is an alist with simple keys."
+  (declare (pure t)
+           (side-effect-free error-free))
+  (while (and (consp (car-safe list))
+              (atom (caar list))
+              (setq list (cdr list))))
+  (null list))
+
+(defun elskel--list-of (fn list)
+  "Check if all elements in LIST satisfy FN.
+
+Argument FN is a function used to test each element in LIST.
+
+Argument LIST is a proper list to be checked with FN."
+  (declare (pure t)
+           (side-effect-free error-free))
+  (and (proper-list-p list)
+       (seq-every-p fn list)))
+
+
+(defun elskel--infer-custom-type-from-value (value)
+  "Convert VALUE to its corresponding custom type specifier.
+
+Argument VALUE is the value to be converted to a custom type specifier."
+  (pcase value
+    ('t 'boolean)
+    (`(,(and (pred (atom)) key) .
+       ,(and (pred (atom)) val))
+     `(cons
+       ,(elskel--infer-custom-type-from-value key)
+       ,(elskel--infer-custom-type-from-value val)))
+    ((pred (stringp)) 'string)
+    ((pred (symbolp)) 'symbol)
+    ((pred (natnump)) 'natnum)
+    ((pred (floatp)) 'float)
+    ((pred (integerp)) 'integer)
+    ((pred (numberp)) 'number)
+    ((pred (elskel--list-of #'stringp))
+     `(repeat string))
+    ((pred (elskel--list-of #'functionp))
+     `(repeat function))
+    ((pred (elskel--list-of #'symbolp))
+     `(set :greedy t
+       ,@(mapcar #'symbol-name value)
+       (repeat
+        :tag "Other"
+        :inline t (symbol :tag "Symbol"))))
+    (`(quote ,it)
+     (elskel--infer-custom-type-from-value it))
+    ((pred (elskel--alist-p))
+     (let* ((key-types (seq-uniq
+                        (mapcar #'elskel--infer-custom-type-from-value
+                                (mapcar #'car value))))
+            (key-type (if (length> key-types 1)
+                          `(choice ,@key-types)
+                        (car key-types)))
+            (value-types (seq-uniq
+                          (mapcar #'elskel--infer-custom-type-from-value
+                                  (mapcar #'cdr value))))
+            (value-type (if (length> value-types 1)
+                            `(choice ,@value-types)
+                          (car value-types))))
+       `(alist
+         :key-type ,key-type
+         :value-type ,value-type)))
+    ((pred (atom)) 'sexp)))
+
+
+;;;###autoload
+(defun elskel-transform ()
+  "Transform a `defvar' form into a `defcustom' form at point."
+  (interactive)
+  (let ((sexp (sexp-at-point)))
+    (pcase sexp
+      (`(defvar ,(and (pred (symbolp))
+                  sym
+                  (guard (not (memq sym '(t nil)))))
+          ,val
+          . ,rest)
+       (pcase-let* ((`(,beg . ,end)
+                     (bounds-of-thing-at-point 'sexp))
+                    (sexp-str (buffer-substring-no-properties beg end))
+                    (suggested-custom-group
+                     (elskel--infer-definition-prefix))
+                    (suggested-custom-type
+                     (elskel--infer-custom-type-from-value val))
+                    (doc (car rest))
+                    (rep (with-temp-buffer
+                           (let ((emacs-lisp-mode-hook nil))
+                             (insert sexp-str)
+                             (emacs-lisp-mode)
+                             (font-lock-ensure)
+                             (forward-char -1)
+                             (newline-and-indent)
+                             (unless doc
+                               (insert (prin1-to-string "Doc."))
+                               (newline-and-indent))
+                             (insert
+                              (format ":group '%s" suggested-custom-group))
+                             (newline-and-indent)
+                             (insert (format ":type '%s" suggested-custom-type))
+                             (goto-char (point-min))
+                             (down-list)
+                             (let ((sym-start (point)))
+                               (forward-sexp)
+                               (delete-region sym-start (point))
+                               (insert "defcustom"))
+                             (goto-char (point-min))
+                             (indent-sexp)
+                             (buffer-string)))))
+         (delete-region beg end)
+         (insert rep)
+         (when (re-search-backward (regexp-opt '(":type") 'symbols) nil t 1)
+           (forward-char 1)))))))
+
 
 ;;;###autoload
 (defun elskel-complete ()
   "Insert context-aware completions or snippets at point."
   (interactive)
   (let ((parent (save-excursion
-                  (when (elskel--backward-up-list)
+                  (when (elskel--goto-outer-list)
                     (sexp-at-point)))))
     (with-undo-amalgamate
-      (cond ((elskel--complete-defcustom-type-p)
+      (cond ((elskel--is-within-defcustom-type-definition)
              (indent-according-to-mode)
              (elskel-complete-custom-type))
             ((elskel--inside-string)
-             (elskel--substitute-map))
+             (elskel--insert-keymap-with-completion))
             ((elskel--interactive-place-p)
              (indent-according-to-mode)
              (elskel--insert "(interactive)"))
-            ((elskel--inside-args-p)
-             (elskel--complete-inside-args))
+            ((elskel--is-within-function-arguments)
+             (elskel--insert-function-argument-with-completion))
+            ((pcase parent
+               (`(defvar ,(and (pred (symbolp))
+                           sym
+                           (guard (not (memq sym '(t nil)))))
+                   ,_val
+                   . ,_rest)
+                t))
+             (elskel--goto-outer-list)
+             (elskel-transform))
             ((pcase parent
                (`(use-package ,(pred (symbolp))
                    . ,_rest)
                 t))
              (indent-according-to-mode)
-             (elskel--complete-use-package))
+             (elskel--autocomplete-use-package-keywords))
             ((pcase parent
                (`(transient-define-prefix ,(pred (symbolp)) . ,_)
                 t))
              (indent-according-to-mode)
-             (elskel--complete-transient-slots))
+             (elskel--autocomplete-transient-prefix-slots))
             (t (indent-according-to-mode)
-               (elskel--snippet-insert))))))
+               (elskel--skeleton-insert))))))
 
 (provide 'elskel)
 ;;; elskel.el ends here
