@@ -192,7 +192,7 @@ interactor strings and skeleton elements."
 
 
 
-(define-skeleton elskel-skeletons-transient-define-prefix-skeleton
+(elskel-skeletons-define-skeleton elskel-skeletons-transient-define-prefix-skeleton
   "Create a `transient-define-prefix' skeleton."
   "transient-define-prefix "
   "(transient-define-prefix " (setq v1 (elskel--infer-definition-prefix)) "-" _
@@ -201,7 +201,7 @@ interactor strings and skeleton elements."
   (prin1-to-string (concat (capitalize v1) "."))
   \n > ")")
 
-(define-skeleton elskel-skeletons-transient-define-suffix-skeleton
+(elskel-skeletons-define-skeleton elskel-skeletons-transient-define-suffix-skeleton
   "Create a `transient-define-suffix' skeleton."
   "transient-define-suffix "
   "(transient-define-suffix " (setq v1 (elskel--infer-definition-prefix)) "-" _ " ()"
@@ -209,10 +209,12 @@ interactor strings and skeleton elements."
   (prin1-to-string (concat (capitalize v1) "."))
   \n > ")")
 
-(define-skeleton elskel-skeletons-transient-define-argument-skeleton
+(elskel-skeletons-define-skeleton
+  elskel-skeletons-transient-define-argument-skeleton
   "Create a `transient-define-argument' skeleton."
   "transient-define-argument "
-  "(transient-define-argument " (setq v1 (elskel--infer-definition-prefix)) "-" _ " ()"
+  "(transient-define-argument " (setq v1 (elskel--infer-definition-prefix)) "-"
+  _ " ()"
   \n >
   (prin1-to-string (concat (capitalize v1) "."))
   \n > ")")
