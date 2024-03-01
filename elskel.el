@@ -30,6 +30,8 @@
 
 ;;; Code:
 
+(require 'transient)
+
 
 (require 'subr-x)
 (require 'find-func)
