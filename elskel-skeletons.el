@@ -48,6 +48,31 @@ interactor strings and skeleton elements."
       (put ',command 'elskel-skeleton ,(car body))
       (add-to-list 'elskel-skeletons-skels ',command))))
 
+(elskel-skeletons-define-skeleton elskel-skeletons--fop-elskel-skeletons
+  "Create a `elskel-skeletojns-define-skeleton' skeleton."
+  "elskel-skeletojns-define-skeleton "
+  "(elskel-skeletons-define-skeleton "
+  (elskel--infer-definition-prefix)
+  "-"
+  (setq v1 (skeleton-read "Definition type: "))
+  "-" "skeleton"
+  \n > (prin1-to-string (format "Create a `%s' skeleton." v1))
+  \n > (prin1-to-string (concat v1 " "))
+  \n > (prin1-to-string (concat "(" v1 " "))
+  " "
+  _
+  "(setq v1 (elskel--infer-definition-prefix)) " (prin1-to-string "-") " _ "
+  (prin1-to-string " ()")
+  \n >
+  "\\n >"
+  \n >
+  (prin1-to-string '(prin1-to-string (concat (capitalize v1) ".")))
+  \n >
+  "\\n > "
+  (prin1-to-string ")")
+  ")")
+
+
 (elskel-skeletons-define-skeleton elskel-skeleton-define-skeleton
   "Create a `define-skeleton' skeleton."
   "define-skeleton"
@@ -219,6 +244,37 @@ interactor strings and skeleton elements."
   (prin1-to-string (concat (capitalize v1) "."))
   \n > ")")
 
+(elskel-skeletons-define-skeleton elskel-skeletons-defalias-skeleton
+  "Create a `defalias' skeleton."
+  "defalias "
+  "(defalias '" (elskel--completing-read-commmand-or-autoload "Symbol: ")
+  " #'"
+  (elskel--completing-read-commmand-or-autoload "Definition: ")
+  ")")
+
+(elskel-skeletons-define-skeleton elskel-skeletons-defvaralias-skeleton
+  "Create a `defvaralias' skeleton."
+  "defvaralias "
+  "(defvaralias "
+  "'" (elskel--completing-read-variable-sym "New alias: ")
+  " "
+  "'" (elskel--completing-read-variable-sym "Base vairable: ") ")")
+
+(elskel-skeletons-define-skeleton
+  elskel-skeletons-all-the-icons-octicon-skeleton
+  "Create a `all-the-icons-octicon' skeleton."
+  "all-the-icons-octicon "
+  "(all-the-icons-octicon " (elskel-completing-read-all-the-icons-octicon) ")")
+
+
+
+;; define-obsolete-variable-alias
+;; define-obsolete-function-alias
+;; define-obsolete-face-alias
+;; define-minor-mode
+;; define-global-minor-mode
+;; define-keymap
+;; define-widget
 
 (provide 'elskel-skeletons)
 ;;; elskel-skeletons.el ends here
