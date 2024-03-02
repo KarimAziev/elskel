@@ -2670,6 +2670,12 @@ Argument VALUE is the value to be converted to a custom type specifier."
     ((pred (floatp)) 'float)
     ((pred (integerp)) 'integer)
     ((pred (numberp)) 'number)
+    ((pred (vectorp))
+     `(vector
+       ,@(mapcar #'elskel--infer-custom-type-from-value
+          (append
+           value
+           nil))))
     ((pred (elskel--list-of #'stringp))
      `(repeat string))
     ((pred (elskel--list-of #'functionp))
