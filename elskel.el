@@ -2642,6 +2642,14 @@ new name to be renamed."
               (setq list (cdr list))))
   (null list))
 
+(defun elskel--plist-p (list)
+  "Non-nil if and only if LIST is a plist of keywords and values."
+  (when (plistp list)
+    (while (and (keywordp (car-safe list))
+                (setq list (cddr list))))
+    (null list)))
+
+
 (defun elskel--list-of (fn list)
   "Check if all elements in LIST satisfy FN.
 
@@ -2702,6 +2710,23 @@ Argument VALUE is the value to be converted to a custom type specifier."
                             `(choice ,@value-types)
                           (car value-types))))
        `(alist
+         :key-type ,key-type
+         :value-type ,value-type)))
+    ((pred (elskel--plist-p))
+     (let* ((partition (seq-partition value 2))
+            (key-types (seq-uniq
+                        (mapcar #'elskel--infer-custom-type-from-value
+                                (mapcar #'car partition))))
+            (key-type (if (length> key-types 1)
+                          `(choice ,@key-types)
+                        (car key-types)))
+            (value-types (seq-uniq
+                          (mapcar #'elskel--infer-custom-type-from-value
+                                  (mapcar #'cadr partition))))
+            (value-type (if (length> value-types 1)
+                            `(choice ,@value-types)
+                          (car value-types))))
+       `(plist
          :key-type ,key-type
          :value-type ,value-type)))
     ((pred (atom)) 'sexp)))
