@@ -2753,7 +2753,11 @@ Argument VALUE is the value to be converted to a custom type specifier."
          (delete-region beg end)
          (insert rep)
          (when (re-search-backward (regexp-opt '(":type") 'symbols) nil t 1)
-           (forward-char 1)))))))
+           (forward-char 1)
+           (when (and
+                  (require 'prettier-elisp nil t)
+                  (fboundp 'prettier-elisp))
+             (prettier-elisp))))))))
 
 ;;;###autoload
 (defun elskel-complete ()
