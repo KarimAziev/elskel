@@ -2684,8 +2684,8 @@ Argument VALUE is the value to be converted to a custom type specifier."
      `(set :greedy t
        ,@(mapcar #'symbol-name value)
        (repeat
-        :tag "Other"
-        :inline t (symbol :tag "Symbol"))))
+        :tag ,(prin1-to-string "Other")
+        :inline t (symbol :tag ,(prin1-to-string "Symbol")))))
     (`(quote ,it)
      (elskel--infer-custom-type-from-value it))
     ((pred (elskel--alist-p))
