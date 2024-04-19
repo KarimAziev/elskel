@@ -458,7 +458,7 @@ Optional argument KEYWORD is a keyword symbol for which to get the value sexps."
     (:bind* . elskel--extra-insert-bind*)
     (:config . elskel--extra-insert-config-keyword)
     (:custom . elskel--extra-insert-customs)
-    (:straight . elskel--extra-insert-straight-keyword))
+    (:straight . elskel--straight-keyword-complete))
   "Alist mapping keywords to functions for inserting package configurations.")
 
 (defun elskel--extra-insert-config-keyword ()
@@ -1021,6 +1021,10 @@ be substituted with when formatting text."
           :key-type string
           :value-type string))
 
+(defun elskel--straight-insert ()
+  "Insert a completed repository type selection."
+  (insert (elskel--straight-keyword-complete)))
+
 (defun elskel--straight-keyword-complete ()
   "Offer completion for repository type and return selection."
   (let* ((choices
@@ -1072,7 +1076,7 @@ be substituted with when formatting text."
                    (if
                        (fboundp
                         'gh-repo-search-repos)
-                       (gh-repo-search-repos "+language:elisp")
+                       (gh-repo-search-repos "" "+language:elisp")
                      (read-string
                       "Repo: "))))
               `(:repo ,repo
