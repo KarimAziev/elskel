@@ -458,7 +458,7 @@ Optional argument KEYWORD is a keyword symbol for which to get the value sexps."
     (:bind* . elskel--extra-insert-bind*)
     (:config . elskel--extra-insert-config-keyword)
     (:custom . elskel--extra-insert-customs)
-    (:straight . elskel--straight-keyword-complete))
+    (:straight . elskel--straight-insert))
   "Alist mapping keywords to functions for inserting package configurations.")
 
 (defun elskel--extra-insert-config-keyword ()
