@@ -2040,40 +2040,43 @@ Argument ITEM is a string that will be inserted into the buffer."
 
 (defun elskel--interactive-place-p ()
   "Check if point is at an interactive place in code."
-  (and (save-excursion
-         (let ((prefix (elskel--get-completion-prefix "interactive"))
-               (ppss))
-           (when prefix
-             (forward-char (- (length prefix)
-                              (length "interactive")))
-             (setq ppss (syntax-ppss (point)))
-             (when (and (cadr ppss)
-                        (= (1+ (cadr ppss))
-                           (point)))
-               (elskel--complete-forward-with #'backward-up-list 1))))
-         (when (elskel--complete-forward-with #'backward-sexp 1)
-           (and (elskel--complete-forward-with #'backward-sexp (if
-                                                                   (save-excursion
-                                                                     (nth 3
-                                                                          (syntax-ppss
-                                                                           (1+
-                                                                            (point)))))
-                                                                   3
-                                                                 2))
-                (and
-                 (not (elskel--complete-forward-with #'backward-sexp 1))
-                 (elskel--complete-forward-with #'backward-up-list 1)
-                 (pcase (sexp-at-point)
-                   (`(,(or 'defun 'cl-defun)
-                      ,(and (pred (symbolp))
-                        sym
-                        (guard (not (memq sym '(t nil)))))
-                      ,(pred (listp))
-                      . ,body-list)
-                    (let ((body (if (stringp (car body-list))
-                                    (cadr body-list)
-                                  (car body-list))))
-                      (not (eq (car-safe body) 'interactive)))))))))))
+  (and
+   (> (point-max)
+      (point-min))
+   (save-excursion
+     (let ((prefix (elskel--get-completion-prefix "interactive"))
+           (ppss))
+       (when prefix
+         (forward-char (- (length prefix)
+                          (length "interactive")))
+         (setq ppss (syntax-ppss (point)))
+         (when (and (cadr ppss)
+                    (= (1+ (cadr ppss))
+                       (point)))
+           (elskel--complete-forward-with #'backward-up-list 1))))
+     (when (elskel--complete-forward-with #'backward-sexp 1)
+       (and (elskel--complete-forward-with #'backward-sexp (if
+                                                               (save-excursion
+                                                                 (nth 3
+                                                                      (syntax-ppss
+                                                                       (1+
+                                                                        (point)))))
+                                                               3
+                                                             2))
+            (and
+             (not (elskel--complete-forward-with #'backward-sexp 1))
+             (elskel--complete-forward-with #'backward-up-list 1)
+             (pcase (sexp-at-point)
+               (`(,(or 'defun 'cl-defun)
+                  ,(and (pred (symbolp))
+                    sym
+                    (guard (not (memq sym '(t nil)))))
+                  ,(pred (listp))
+                  . ,body-list)
+                (let ((body (if (stringp (car body-list))
+                                (cadr body-list)
+                              (car body-list))))
+                  (not (eq (car-safe body) 'interactive)))))))))))
 
 (defun elskel--autocomplete-use-package-keywords ()
   "Autocomplete `use-package' keywords and insert them."
