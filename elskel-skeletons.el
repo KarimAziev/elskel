@@ -177,7 +177,7 @@ interactor strings and skeleton elements."
   (setq v1 (mapcar (lambda (it)
                      (let ((descr (format "%s" (cdr it))))
                        (cons (format "%s"(car it))
-                             (if-let ((pos (string-match
+                             (if-let* ((pos (string-match
                                             "(lambda ("
                                             descr)))
                                  (substring descr pos

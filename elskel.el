@@ -122,7 +122,7 @@ used in the Emacs configuration."
 
 (defun elskel--extra-use-package-at-point-p ()
   "Check if point is on a `use-package' form."
-  (when-let ((sexp (elskel--extra-sexp-at-point)))
+  (when-let* ((sexp (elskel--extra-sexp-at-point)))
     (and
      (car-safe sexp)
      (symbolp (car-safe sexp))
@@ -174,7 +174,7 @@ declaration."
 
 (defun elskel--extra-get-current-package-name ()
   "Extract the current package name at point."
-  (when-let ((beg (elskel--extra-inside-use-package-p)))
+  (when-let* ((beg (elskel--extra-inside-use-package-p)))
     (save-excursion
       (goto-char beg)
       (down-list 1)
@@ -190,13 +190,13 @@ Optional argument N is an integer specifying the number of times to move; it
 defaults to 1."
   (with-syntax-table emacs-lisp-mode-syntax-table
     (unless n (setq n 1))
-    (when-let ((str-start (nth 8 (syntax-ppss (point)))))
+    (when-let* ((str-start (nth 8 (syntax-ppss (point)))))
       (goto-char str-start))
     (let ((init-pos (point))
           (pos)
           (count n))
       (while (and (not (= count 0))
-                  (when-let ((end (ignore-errors
+                  (when-let* ((end (ignore-errors
                                     (funcall fn)
                                     (point))))
                     (unless (= end (or pos init-pos))
@@ -280,7 +280,7 @@ to 1."
 
 (defun elskel--extra-get-use-package-bounds ()
   "Find bounds of the current `use-package' form."
-  (when-let ((start (elskel--extra-inside-use-package-p)))
+  (when-let* ((start (elskel--extra-inside-use-package-p)))
     (save-excursion
       (goto-char start)
       (elskel--extra-move-with 'forward-sexp)
@@ -296,7 +296,7 @@ one."
   (pcase-let ((`(,beg . ,_end)
                (elskel--extra-get-use-package-bounds)))
     (when beg
-      (when-let ((keyword-end
+      (when-let* ((keyword-end
                   (save-excursion
                     (let* ((existing
                             (elskel--extra-get-use-package-keywords))
@@ -408,7 +408,7 @@ declaration."
   "Extract KEYWORD value sexps from a string.
 
 Optional argument KEYWORD is a keyword symbol for which to get the value sexps."
-  (when-let ((str (elskel--extra-get-keyword-value keyword)))
+  (when-let* ((str (elskel--extra-get-keyword-value keyword)))
     (pcase keyword
       ((or :bind :bind*)
        (let ((val (car (elskel--extra-read-string str))))
@@ -534,7 +534,7 @@ Argument SYM is a symbol representing the library to find.
 
 Argument DIR is a string specifying the directory to search for the library."
   (require 'find-func)
-  (when-let ((file (ignore-errors
+  (when-let* ((file (ignore-errors
                      (file-truename (find-library-name (symbol-name sym))))))
     (when (file-in-directory-p file dir)
       file)))
@@ -595,7 +595,7 @@ the result."
                              (t key)))
                       extra-props))))))
           ('require
-           (when-let ((sym
+           (when-let* ((sym
                        (pcase item
                          (`(require ,(and name
                                       (guard (listp name))
@@ -613,7 +613,7 @@ the result."
                             ,(and optional
                               (guard (not (eq optional nil)))))
                           (elskel--extra--unquote name)))))
-             (if-let ((file (elskel--extra--find-lib-in-dir
+             (if-let* ((file (elskel--extra--find-lib-in-dir
                              sym
                              default-directory)))
                  (append (list (cons sym (append extra-props
@@ -623,7 +623,7 @@ the result."
                 (list (cons sym (append extra-props
                                         (list :type type))))))))
           ((or 'use-package 'use-package!)
-           (when-let ((sym (and
+           (when-let* ((sym (and
                             (cadr item)
                             (symbolp (cadr item))
                             (cadr item))))
@@ -699,7 +699,7 @@ the result."
                                                           (listp (car vals)))
                                                  (seq-find
                                                   (lambda (it)
-                                                    (when-let ((val (and
+                                                    (when-let* ((val (and
                                                                      (listp
                                                                       (cdr
                                                                        it))
@@ -719,7 +719,7 @@ the result."
                   (setq sym (elskel--extra--unquote sym)))
                  ((or 'put 'add-hook
                       'advice-add)
-                  (when-let ((hook
+                  (when-let* ((hook
                               (elskel--extra--unquote
                                (nth 1
                                     item))))
@@ -1211,7 +1211,7 @@ be substituted with when formatting text."
                                tslots)))))
                 (elskel--insert prefix)))
              ((not (seq-find #'vectorp body))
-              (when-let ((cand (elskel--completing-read-with-preview "Slot: "
+              (when-let* ((cand (elskel--completing-read-with-preview "Slot: "
                                                                      tslots)))
                 (elskel--insert
                  (concat cand (if (looking-at " ")  "" " "))))))))))
@@ -1323,7 +1323,7 @@ initialization arguments."
     (run-hook-wrapped
      'elskel-minibuffer-candidate-finders
      (lambda (fun)
-       (when-let ((result (funcall fun)))
+       (when-let* ((result (funcall fun)))
          (when (and (cdr-safe result)
                     (stringp (cdr-safe result))
                     (not (string-empty-p (cdr-safe result))))
@@ -1628,7 +1628,7 @@ Optional argument PROMPT is a string to display as the prompt in the minibuffer.
   (elskel--completing-read-definition-annotated
    (or prompt "Command: ")
    (lambda (it)
-     (when-let ((pl (cdr-safe it)))
+     (when-let* ((pl (cdr-safe it)))
        (or (plist-get pl :interactive)
            (plist-get pl :autoload))))))
 
@@ -1753,7 +1753,7 @@ Remaining arguments ARGS are additional arguments passed to `completing-read'."
           (push current result)
           (setq alist (or (cdr-safe (assoc current alist))
                           (cdr (seq-find
-                                (lambda (it) (when-let ((val (car-safe it)))
+                                (lambda (it) (when-let* ((val (car-safe it)))
                                                (pcase val
                                                  ((pred symbolp)
                                                   (string=
@@ -1800,7 +1800,7 @@ Argument S2 is a string to compare with S1."
                        (condition-case nil
                            (progn (backward-list) t)
                          (error nil)))
-              (when-let ((item (ignore-errors (sexp-at-point))))
+              (when-let* ((item (ignore-errors (sexp-at-point))))
                 (pcase item
                   (`(provide (quote ,(and (pred (symbolp)) sym)) . ,_)
                    (setq found (symbol-name sym))))))))
@@ -1968,7 +1968,7 @@ defaulting to 1."
   (unless n (setq n 1))
   (let ((parse-sexp-ignore-comments t)
         (pos (point)))
-    (when-let ((str-start (nth 8 (syntax-ppss (point)))))
+    (when-let* ((str-start (nth 8 (syntax-ppss (point)))))
       (goto-char str-start))
     (condition-case nil
         (progn (funcall fn n)
@@ -2018,7 +2018,7 @@ Argument ITEM is a string representing the completion item."
          (char (char-before pos)))
     (catch 'found
       (while
-          (when-let ((chars (member char item-chars)))
+          (when-let* ((chars (member char item-chars)))
             (setq item-chars (cdr chars))
             (let* ((str (mapconcat #'char-to-string (reverse chars) ""))
                    (beg (- pos
@@ -2084,7 +2084,7 @@ Argument ITEM is a string that will be inserted into the buffer."
         (elskel--use-package-keywords-completions-alist))
   (let ((words (mapcar #'car (elskel--use-package-keywords-completions-alist)))
         (prefix
-         (when-let ((s (symbol-at-point)))
+         (when-let* ((s (symbol-at-point)))
            (symbol-name s))))
     (cond ((and prefix (member prefix words))
            (insert "\s")
@@ -2101,7 +2101,7 @@ Argument ITEM is a string that will be inserted into the buffer."
                             "\s")))
           ((setq prefix (save-excursion
                           (skip-chars-backward "\s\t\n")
-                          (car (member (when-let ((s (symbol-at-point)))
+                          (car (member (when-let* ((s (symbol-at-point)))
                                          (symbol-name s))
                                        words))))
            (let* ((sublist
@@ -2131,7 +2131,7 @@ Argument ITEM is a string that will be inserted into the buffer."
 (defun elskel--insert-function-argument-with-completion ()
   "Insert a Lisp argument with completion."
   (let ((prefix
-         (when-let ((sym (symbol-at-point)))
+         (when-let* ((sym (symbol-at-point)))
            (format "%s" sym)))
         (args (save-excursion
                 (elskel--goto-outer-list)
@@ -2166,7 +2166,7 @@ Argument ITEM is a string that will be inserted into the buffer."
   (save-excursion
     (and (elskel--complete-forward-with #'backward-up-list 1)
          (elskel--complete-forward-with #'backward-sexp 1)
-         (when-let ((sym (symbol-at-point)))
+         (when-let* ((sym (symbol-at-point)))
            (or (and (eq sym 'lambda)
                     (not (elskel--complete-forward-with #'backward-sexp 1)))
                (and (elskel--complete-forward-with #'backward-sexp 1)
@@ -2198,7 +2198,7 @@ patterns for key binding declarations."
 
 (defun elskel--use-package-inside-bind-consp ()
   "Check if point is inside a `use-package' key binding form."
-  (if-let ((sexps (elskel--get-sexps-backward)))
+  (if-let* ((sexps (elskel--get-sexps-backward)))
       (elskel--use-package-bind-cons-p
        sexps)
     (save-excursion
@@ -2357,7 +2357,7 @@ binding forms."
                                  (and (not stop)
                                       (setq context
                                             (or
-                                             (when-let ((bindform (elskel--after-use-package-bind-p)))
+                                             (when-let* ((bindform (elskel--after-use-package-bind-p)))
                                                (throw 'found bindform))
                                              (and (elskel--use-package-inside-bind-consp)
                                                   'command)
@@ -2371,7 +2371,7 @@ binding forms."
                                                     #'elskel--use-package-bind-cons-p
                                                     items)))))
                                              (and (elskel--goto-outer-list)
-                                                  (when-let ((bindform (elskel--after-use-package-bind-p)))
+                                                  (when-let* ((bindform (elskel--after-use-package-bind-p)))
                                                     (throw 'found bindform))))))
                                (push context stack)
                                (setq stop (not (elskel--goto-outer-list)))))))
@@ -2499,7 +2499,7 @@ defaults to 1."
                                       (zerop idx)
                                       (not type)))
                (keyword (save-excursion
-                          (when-let ((sym (ignore-errors
+                          (when-let* ((sym (ignore-errors
                                             (when inside-str
                                               (goto-char (nth 8 stx)))
                                             (forward-sexp -1)
@@ -2610,7 +2610,7 @@ defaults to 1."
                                                   (memq quoted '(?\`?\'))))))))))))
              (error nil)))
           ((> depth 1)
-           (when-let ((start (cadr (nth 9 ppss))))
+           (when-let* ((start (cadr (nth 9 ppss))))
              (goto-char (cadr (nth 9 ppss)))
              (elskel--is-within-defcustom-type))))))
 
